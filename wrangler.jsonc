@@ -6,11 +6,11 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": {
-    "ALLOWED_ORIGINS": "https://chess.retrac.space,https://pong.retrac.space,https://2048.retrac.space"
+    "ALLOWED_ORIGINS": "https://chess.retrac.space,https://pong.retrac.space,https://2048.retrac.space,https://basketsmash.retrac.space"
   },
   "d1_databases": [{
     "binding": "DB", "database_name": "space-api",
-    "database_id": "00000000-0000-0000-0000-000000000000",
+    "database_id": "7a9976c6-b212-4b2a-ac78-79b8afe41d38",
     "migrations_dir": "migrations"
   }],
   "ratelimits": [
