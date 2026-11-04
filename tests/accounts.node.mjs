@@ -33,7 +33,7 @@ test('session and directory use canonical HTTPS, bounded fetch, and only bridge 
   assert.deepEqual(await directory(env, { ids: ['test-id'] }), [{ id: 'test-id', username: 'tester' }]);
   for (const { url, init } of calls) {
     assert.ok(['https://accounts.retrac.space/api/internal/games/session', 'https://accounts.retrac.space/api/internal/games/players'].includes(url));
-    assert.equal(init.method, 'POST'); assert.equal(init.redirect, 'error');
+    assert.equal(init.method, 'POST'); assert.equal(init.redirect, 'manual');
     assert.ok(init.signal instanceof AbortSignal);
     const headers = new Headers(init.headers);
     assert.equal(headers.get('X-Space-Api-Key'), env.ACCOUNTS_API_KEY);
@@ -63,6 +63,7 @@ test('failures emit only sanitized categories/status/timing and preserve the pub
     { reason: 'upstream_status', status: 530, response: () => new Response(sensitive, { status: 530 }) },
     { reason: 'timeout', response: () => { throw new DOMException(sensitive, 'TimeoutError'); } },
     { reason: 'worker_routing', response: () => { throw new Error(`error code: 1042 ${sensitive}`); } },
+    { reason: 'unsupported_redirect', response: () => { throw new TypeError(`Invalid redirect value, must be one of "follow" or "manual" ${sensitive}`); } },
     { reason: 'fetch_failed', response: () => { throw new Error(sensitive); } },
     { reason: 'invalid_json', status: 200, response: () => new Response(sensitive) },
   ]) {
@@ -81,6 +82,23 @@ test('failures emit only sanitized categories/status/timing and preserve the pub
     assert.ok(!JSON.stringify(args).includes(sensitive));
     assert.ok(!JSON.stringify(args).includes(token));
     assert.ok(!JSON.stringify(args).includes(env.ACCOUNTS_API_KEY));
+    fetch.mock.restore(); warn.mock.restore();
+  }
+});
+
+test('all upstream redirects fail closed without a second fetch or logging Location', async () => {
+  for (const status of [301, 302, 303, 307, 308]) {
+    const fetch = mock.method(globalThis, 'fetch', async (_url, init) => {
+      assert.equal(init.redirect, 'manual');
+      return new Response(null, { status, headers: { Location: `https://untrusted.example/?private=${token}` } });
+    });
+    const warn = mock.method(console, 'warn', () => {});
+    await assert.rejects(session(request(), env), { status: 503, code: 'accounts_unavailable' });
+    assert.equal(fetch.mock.callCount(), 1);
+    assert.equal(warn.mock.callCount(), 1);
+    assert.equal(warn.mock.calls[0].arguments[0].reason, 'upstream_redirect');
+    assert.equal(warn.mock.calls[0].arguments[0].upstreamStatus, status);
+    assert.ok(!JSON.stringify(warn.mock.calls).includes(token));
     fetch.mock.restore(); warn.mock.restore();
   }
 });

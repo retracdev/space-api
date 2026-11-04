@@ -9,6 +9,7 @@
     "build": "wrangler deploy --dry-run --outdir dist",
     "test": "vitest run",
     "test:accounts": "node --experimental-transform-types --test tests/accounts.node.mjs",
+    "test:accounts:runtime": "workerd test tests/accounts-runtime.capnp",
     "db:migrate": "wrangler d1 migrations apply space-api --local"
   },
   "dependencies": { "drizzle-orm": "0.45.4" },

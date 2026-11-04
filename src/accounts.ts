@@ -4,7 +4,7 @@ export interface Identity { id: string; username: string | null }
 export interface AccountEnv { ACCOUNTS_API_KEY: string }
 const base = 'https://accounts.retrac.space/api/internal/games/';
 type Operation = 'session' | 'players';
-type Failure = 'configuration' | 'upstream_status' | 'timeout' | 'worker_routing' | 'fetch_failed' | 'invalid_json';
+type Failure = 'configuration' | 'upstream_status' | 'upstream_redirect' | 'unsupported_redirect' | 'timeout' | 'worker_routing' | 'fetch_failed' | 'invalid_json';
 
 function diagnostic(operation: Operation, reason: Failure, started: number, upstreamStatus?: number) {
   // Construct an allowlisted record. Never pass request/response objects, bodies,
@@ -25,7 +25,9 @@ async function call(env: AccountEnv, path: Operation, body: unknown, token?: str
   const signal = AbortSignal.timeout(5000);
   try {
     const response = await fetch(base + path, {
-      method: 'POST', redirect: 'error', signal,
+      // Workers rejects redirect: 'error' during Request construction. Manual
+      // mode sends the request but never forwards bridge credentials elsewhere.
+      method: 'POST', redirect: 'manual', signal,
       headers: { 'Content-Type': 'application/json', 'X-Space-Api-Key': env.ACCOUNTS_API_KEY,
         ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify(body),
@@ -33,7 +35,7 @@ async function call(env: AccountEnv, path: Operation, body: unknown, token?: str
     upstreamStatus = response.status;
     if (response.status === 401 && path === 'session') throw new ApiError(401, 'invalid_session');
     if (!response.ok) {
-      diagnostic(path, 'upstream_status', started, upstreamStatus);
+      diagnostic(path, response.status >= 300 && response.status < 400 ? 'upstream_redirect' : 'upstream_status', started, upstreamStatus);
       throw new ApiError(503, 'accounts_unavailable');
     }
     stage = 'json';
@@ -42,6 +44,7 @@ async function call(env: AccountEnv, path: Operation, body: unknown, token?: str
     if (error instanceof ApiError) throw error;
     const reason: Failure = signal.aborted || (error instanceof Error && error.name === 'TimeoutError') ? 'timeout' :
       stage === 'json' ? 'invalid_json' :
+      error instanceof TypeError && error.message.startsWith('Invalid redirect value, must be one of "follow" or "manual"') ? 'unsupported_redirect' :
       error instanceof Error && /\b1042\b/.test(error.message) ? 'worker_routing' : 'fetch_failed';
     diagnostic(path, reason, started, upstreamStatus);
     throw new ApiError(503, 'accounts_unavailable');
