@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "space-api",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-03",
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {
+    "ALLOWED_ORIGINS": "https://chess.retrac.space,https://pong.retrac.space,https://2048.retrac.space"
+  },
+  "d1_databases": [{
+    "binding": "DB", "database_name": "space-api",
+    "database_id": "00000000-0000-0000-0000-000000000000",
+    "migrations_dir": "migrations"
+  }],
+  "ratelimits": [
+    { "name": "WRITE_LIMITER", "namespace_id": "83001", "simple": { "limit": 30, "period": 60 } },
+    { "name": "REQUEST_LIMITER", "namespace_id": "83002", "simple": { "limit": 120, "period": 60 } }
+  ]
+}

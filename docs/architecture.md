@@ -1,0 +1,23 @@
+# Shared game API
+
+This is a personal retrac.space project. It uses no Retrac Labs accounts, databases, secrets, services or billing configuration. The website and accounts repository are unchanged. One Worker, one dedicated D1 database, and the existing account service are sufficient.
+
+`src/worker.ts` implements REST routing and authorization; `src/accounts.ts` is a server-side adapter to the account-owned contract below, not an authentication SDK. Drizzle defines data access and schema. Migrations define reviewed games and leaderboards. There are no passwords, sessions, copied usernames, or account secrets in this database. Every owner key is the immutable Better Auth user ID. Local database foreign keys cannot reference a different D1 database.
+
+Saves use `(user_id, game_id, slot)` as primary key. Slots are zero-based, limited per game, and contain a JSON object or array of at most 65,536 UTF-8 bytes. The streamed request limit is 66,560 bytes. PUT replaces the whole save; last write wins. Guests use browser storage. Automatic local-to-cloud merging is a game decision.
+
+Each leaderboard retains one personal best per user, atomically updated only on improvement. Equal scores keep their original timestamp. Rankings sort by score then stable user ID ascending; ties occupy separate positions. Ascending and descending composite indexes support paginated ordering and rank counts. Rank queries count better scores; no full window-function result is materialized. Offset pagination is capped at 10,000; concurrent score changes can shift pages. This is appropriate for a small personal platform; add cursor pagination if scale warrants it.
+
+Accounts resolves current names in batches at read time. Deleted users and incomplete username onboarding are omitted from public responses, including their scores. Unavailable accounts fail closed with 503; there is no stale name fallback. Deleted identities leave inaccessible saves and score tombstones. Tombstones still occupy ranking positions, so public pages may contain gaps or fewer results; follow `nextOffset`, not returned entry count. An account deletion integration can later erase rows by immutable ID; this API offers no public deletion webhook or privileged dashboard. Never reconnect retained data by username, which may be reused.
+
+Numeric scores must be finite, within the configured range and safe numeric magnitude, with integer validation when configured. Browser scores are **not cheat-proof**. Anyone controlling their browser can fabricate a plausible score. Rate limits reduce flooding, not cheating. A future account-verified server validator can be inserted before the atomic best update. No cryptographic score proof or game servers are required.
+
+Workers rate-limit bindings apply approximate per-location limits: 120 requests/minute/IP before account calls, 30 writes/minute/user across saves and boards. They are not strict global quotas. Shared IPs can hit the request limit. Missing bindings fail closed. Reserve the configured namespace IDs in the personal Cloudflare account, or choose unique IDs before deployment. These are infrastructure identifiers, not secrets. No request bodies, authorization values or account diagnostics are logged by application code.
+
+Register games through reviewed SQL migrations. IDs match `[a-z0-9][a-z0-9-]{0,39}`. Set 1–20 save slots and zero or more board definitions (direction, score type, min/max). New games require no route code. Seeds are example initial rules, not claims of fair or verified scoring. Board rule changes can invalidate old results: use a new board ID for incompatible seasons/rules. Approved browser origins are an explicit independent configuration; registering a game does not authorize an arbitrary origin.
+
+## Local development
+
+Use Node 24, `npm ci`, `npm run db:migrate`, and `npm run dev`. Put `ACCOUNTS_API_KEY` in ignored `.dev.vars` only after the account bridge exists. No local fake authentication ships in the Worker. Tests stub the upstream account service and use isolated local D1 with actual migrations. Do not add localhost to production trust; use a separately reviewed development account service and origin configuration for interactive local authenticated testing.
+
+Migrations are reviewed, hand-written SQL consumed by Wrangler D1. Keep `src/schema.ts` synchronized when adding a new numbered schema migration; registry-only changes need only SQL. Do not rewrite already applied migrations or run Drizzle generation over this hand-written baseline (there is no generator snapshot history). `npm run build` is a Wrangler dry-run bundle, with no deployment.
