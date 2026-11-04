@@ -3,6 +3,7 @@
   "name": "space-api",
   "main": "src/worker.ts",
   "compatibility_date": "2026-11-03",
+  "compatibility_flags": ["global_fetch_strictly_public"],
   "workers_dev": true,
   "preview_urls": false,
   "vars": {

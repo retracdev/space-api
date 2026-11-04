@@ -1,5 +1,7 @@
 # Deployment plan — no live resources changed
 
+For the account bridge's runtime routing flag, sanitized diagnostics and the current fix rollout, see [auth-bridge-routing.md](auth-bridge-routing.md). The original launch plan below predates the deployed accounts bridge and dedicated database configuration.
+
 Use a personal Cloudflare account and a dedicated `space-api` D1 database. Do not bind any Retrac Labs resource, the accounts database, or website assets. `wrangler.jsonc` intentionally contains a placeholder database UUID and no routes/custom domains. No production deployment, remote migration, paid provisioning or DNS action is authorized by this implementation.
 
 ## Domain decision
