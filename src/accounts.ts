@@ -3,22 +3,47 @@ import { ApiError } from './http';
 export interface Identity { id: string; username: string | null }
 export interface AccountEnv { ACCOUNTS_API_KEY: string }
 const base = 'https://accounts.retrac.space/api/internal/games/';
+type Operation = 'session' | 'players';
+type Failure = 'configuration' | 'upstream_status' | 'timeout' | 'worker_routing' | 'fetch_failed' | 'invalid_json';
+
+function diagnostic(operation: Operation, reason: Failure, started: number, upstreamStatus?: number) {
+  // Construct an allowlisted record. Never pass request/response objects, bodies,
+  // headers, URLs, exception messages/stacks or account identities to the logger.
+  console.warn({ event: 'accounts_bridge_failure', operation, reason,
+    elapsedMs: Math.max(0, Date.now() - started), ...(upstreamStatus === undefined ? {} : { upstreamStatus }) });
+}
 
 // Accounts owns all token and live session validation. Never forward cookies.
-async function call(env: AccountEnv, path: string, body: unknown, token?: string): Promise<unknown> {
-  if (!env.ACCOUNTS_API_KEY || env.ACCOUNTS_API_KEY.length < 32) throw new ApiError(503, 'accounts_unavailable');
+async function call(env: AccountEnv, path: Operation, body: unknown, token?: string): Promise<unknown> {
+  const started = Date.now();
+  if (!env.ACCOUNTS_API_KEY || env.ACCOUNTS_API_KEY.length < 32) {
+    diagnostic(path, 'configuration', started);
+    throw new ApiError(503, 'accounts_unavailable');
+  }
+  let stage: 'fetch' | 'json' = 'fetch';
+  let upstreamStatus: number | undefined;
+  const signal = AbortSignal.timeout(5000);
   try {
     const response = await fetch(base + path, {
-      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000),
+      method: 'POST', redirect: 'error', signal,
       headers: { 'Content-Type': 'application/json', 'X-Space-Api-Key': env.ACCOUNTS_API_KEY,
         ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify(body),
     });
+    upstreamStatus = response.status;
     if (response.status === 401 && path === 'session') throw new ApiError(401, 'invalid_session');
-    if (!response.ok) throw new ApiError(503, 'accounts_unavailable');
+    if (!response.ok) {
+      diagnostic(path, 'upstream_status', started, upstreamStatus);
+      throw new ApiError(503, 'accounts_unavailable');
+    }
+    stage = 'json';
     return await response.json();
   } catch (error) {
     if (error instanceof ApiError) throw error;
+    const reason: Failure = signal.aborted || (error instanceof Error && error.name === 'TimeoutError') ? 'timeout' :
+      stage === 'json' ? 'invalid_json' :
+      error instanceof Error && /\b1042\b/.test(error.message) ? 'worker_routing' : 'fetch_failed';
+    diagnostic(path, reason, started, upstreamStatus);
     throw new ApiError(503, 'accounts_unavailable');
   }
 }
