@@ -6,7 +6,7 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": {
-    "ALLOWED_ORIGINS": "https://chess.retrac.space,https://pong.retrac.space,https://2048.retrac.space,https://basketsmash.retrac.space"
+    "ALLOWED_ORIGINS": "https://chess.retrac.space,https://pong.retrac.space,https://2048.retrac.space,https://basketsmash.retrac.space,https://accounts.retrac.space"
   },
   "d1_databases": [{
     "binding": "DB", "database_name": "space-api",
