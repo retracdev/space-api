@@ -6,9 +6,9 @@
   "compatibility_flags": ["global_fetch_strictly_public"],
   "workers_dev": true,
   "preview_urls": false,
-  "vars": {
-    "ALLOWED_ORIGINS": "https://chess.retrac.space,https://pong.retrac.space,https://2048.retrac.space,https://basketsmash.retrac.space,https://accounts.retrac.space"
-  },
+"vars": {
+  "ALLOWED_ORIGINS": "https://chess.retrac.space,https://pong.retrac.space,https://2048.retrac.space,https://basketsmash.retrac.space,https://accounts.retrac.space"
+}
   "d1_databases": [{
     "binding": "DB", "database_name": "space-api",
     "database_id": "7a9976c6-b212-4b2a-ac78-79b8afe41d38",
