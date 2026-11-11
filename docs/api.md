@@ -9,6 +9,7 @@ Protected endpoints require `Authorization: Bearer <short-lived-account-token>`.
 | GET `/v1/health` | public | none | `{status:"ok"}` (process liveness, not dependency readiness) |
 | GET `/v1/session` | optional | none | `{authenticated:boolean,player:null\|{id,username}}` |
 | GET `/v1/players/me` | required | none | `{id,username,personalBests:[{gameId,leaderboardId,score}]}` |
+| GET `/v1/players/id/{userId}` | public | URL-encoded retrac.space user ID, 1–256 characters after decoding | `{username}` (current account username) |
 | GET `/v1/players/{username}` | public | normalized username, 3–20 letters/digits/underscores | `{username,personalBests:[{gameId,leaderboardId,score}]}` |
 | GET `/v1/games` | public | none | array of `{id,name,saveSlots}` |
 | GET `/v1/games/{game}` | public | none | `{id,name,saveSlots,leaderboards:[Board]}` |
@@ -29,6 +30,19 @@ Protected endpoints require `Authorization: Bearer <short-lived-account-token>`.
 `Board` is `{gameId:string,id:string,name:string,direction:"asc"|"desc",scoreType:"integer"|"number",minScore:number,maxScore:number}`. Game/board IDs match `[a-z0-9][a-z0-9-]{0,39}`. Saves have zero-based numeric slots less than game.saveSlots. JSON strings, scalars and null are not valid save roots. The encoded data limit is 65,536 bytes and request limit 66,560 bytes; this includes whitespace/envelope overhead for the request. Send compact JSON. No unknown keys are allowed in save/score bodies. Scores must be finite, within the board range and ±Number.MAX_SAFE_INTEGER, and safe integers for integer boards. Ranges are inclusive. `desc` means higher wins; `asc` means lower wins. Repeated/worse submissions succeed with the existing best and rank. Rankings are ordinal, one-based, with stable user-ID tie breaking. Pagination is live rather than a snapshot; `nextOffset` can lead to an empty last page. Deleted/unavailable-name rows are omitted and can create rank gaps; see architecture notes.
 
 Examples (no real tokens or player data):
+
+Look up a current username without an Authorization header or cookies:
+
+```js
+const response = await fetch(
+  `https://api.retrac.space/v1/players/id/${encodeURIComponent(userId)}`,
+  { credentials: 'omit' },
+);
+// On success: { "data": { "username": "current_name" } }
+const result = await response.json();
+```
+
+The ID lookup reads the accounts directory on every request and uses the existing request rate limit and CORS origin allowlist. Malformed encoding or IDs longer than 256 characters return 400 `invalid_user_id`. Unknown/deleted users and users without a username return 404 `player_not_found`; an unavailable accounts service returns 503 `accounts_unavailable`. No other account fields are returned.
 
 ```http
 PUT /v1/games/2048/saves/0
