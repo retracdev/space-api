@@ -8,7 +8,7 @@ import { inspectImage, MAX_IMAGE_BYTES } from './images';
 // ---- Centralized storage configuration -------------------------------------
 // Temporary testing quota for Glow saves. The intended production limit is 50;
 // raising it is a one-line change here and needs no migration.
-export const GLOW_MAX_SAVED_IMAGES = 10;
+export const GLOW_MAX_SAVED_IMAGES = 50;
 
 export interface StorageCategory {
   app: string; // application identifier recorded with each image
