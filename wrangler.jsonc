@@ -6,14 +6,16 @@
   "compatibility_flags": ["global_fetch_strictly_public"],
   "workers_dev": true,
   "preview_urls": false,
-"vars": {
-  "ALLOWED_ORIGINS": "https://chess.retrac.space,https://pong.retrac.space,https://2048.retrac.space,https://basketsmash.retrac.space,https://accounts.retrac.space,https://soundboard.retrac.space,https://glowstudio.retrac.space"
-},
+  "vars": {
+    "ALLOWED_ORIGINS": "https://chess.retrac.space,https://pong.retrac.space,https://2048.retrac.space,https://basketsmash.retrac.space,https://accounts.retrac.space,https://soundboard.retrac.space,https://glowstudio.retrac.space"
+  },
   "d1_databases": [{
     "binding": "DB", "database_name": "space-api",
     "database_id": "7a9976c6-b212-4b2a-ac78-79b8afe41d38",
     "migrations_dir": "migrations"
   }],
+  // Existing bucket; declared here so deploys keep the binding. No credentials needed.
+  "r2_buckets": [{ "binding": "SPACE_STORAGE", "bucket_name": "space-storage" }],
   "ratelimits": [
     { "name": "WRITE_LIMITER", "namespace_id": "83001", "simple": { "limit": 30, "period": 60 } },
     { "name": "REQUEST_LIMITER", "namespace_id": "83002", "simple": { "limit": 120, "period": 60 } }

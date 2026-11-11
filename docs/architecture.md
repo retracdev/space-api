@@ -16,6 +16,8 @@ Workers rate-limit bindings apply approximate per-location limits: 120 requests/
 
 Register games through reviewed SQL migrations. IDs match `[a-z0-9][a-z0-9-]{0,39}`. Set 1–20 save slots and zero or more board definitions (direction, score type, min/max). New games require no route code. Seeds are example initial rules, not claims of fair or verified scoring. Board rule changes can invalidate old results: use a new board ID for incompatible seasons/rules. Approved browser origins are an explicit independent configuration; registering a game does not authorize an arbitrary origin.
 
+Image storage (`src/storage.ts`, `src/images.ts`) keeps bytes in the `space-storage` R2 bucket via the native `SPACE_STORAGE` binding and ownership metadata in the `storage_images` table. Approved categories map to server-built key prefixes; quotas are per user and category in code configuration. Glow saves are currently limited to 2 per user for testing (intended: 50). See [storage.md](storage.md).
+
 ## Local development
 
 Use Node 24, `npm ci`, `npm run db:migrate`, and `npm run dev`. Put `ACCOUNTS_API_KEY` in ignored `.dev.vars` only after the account bridge exists. No local fake authentication ships in the Worker. Tests stub the upstream account service and use isolated local D1 with actual migrations. Do not add localhost to production trust; use a separately reviewed development account service and origin configuration for interactive local authenticated testing.

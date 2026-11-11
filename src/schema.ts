@@ -35,3 +35,26 @@ export const scores = sqliteTable('scores', {
   index('scores_rank_desc').on(t.gameId, t.boardId, sql`${t.score} DESC`, t.userId),
   index('scores_user').on(t.userId),
   check('score_safe', sql`${t.score} BETWEEN -9007199254740991 AND 9007199254740991`)]);
+
+// Reusable image storage metadata. Bytes live in the SPACE_STORAGE R2 bucket.
+// `pending` rows are short-lived quota reservations; `deleting` rows are being
+// removed from R2. Only `ready` rows are listed or publicly served.
+export const storageImages = sqliteTable('storage_images', {
+  id: text('id').primaryKey(),
+  ownerId: text('owner_id').notNull(),
+  appId: text('app_id').notNull(),
+  category: text('category').notNull(),
+  objectKey: text('object_key').notNull().unique(),
+  mimeType: text('mime_type').notNull(),
+  size: integer('size').notNull(),
+  width: integer('width').notNull(),
+  height: integer('height').notNull(),
+  status: text('status', { enum: ['pending', 'ready', 'deleting'] }).notNull(),
+  createdAt: integer('created_at').notNull(),
+}, t => [index('storage_images_owner').on(t.ownerId, t.category, t.status, t.createdAt),
+  index('storage_images_status').on(t.status, t.createdAt),
+  check('storage_id_valid', sql`length(${t.id}) = 32 AND ${t.id} NOT GLOB '*[^0-9a-f]*'`),
+  check('storage_mime_valid', sql`${t.mimeType} IN ('image/png','image/jpeg','image/webp','image/gif')`),
+  check('storage_size_valid', sql`${t.size} BETWEEN 1 AND 2097152`),
+  check('storage_dimensions_valid', sql`${t.width} BETWEEN 1 AND 16384 AND ${t.height} BETWEEN 1 AND 16384`),
+  check('storage_status_valid', sql`${t.status} IN ('pending','ready','deleting')`)]);

@@ -14,6 +14,10 @@ The simplest deployment of the requested Worker uses `https://space-api.<persona
 
 To obtain the intended `api.retrac.space` hostname while retaining Vercel DNS, a practical alternative is the same module on **Cloudflare Pages advanced mode** (a Worker runtime with D1). [Pages supports externally managed subdomain DNS](https://developers.cloudflare.com/pages/configuration/custom-domains/): first associate `api.retrac.space` with a new, separate Pages project, then add only the Vercel `api` CNAME to that project's pages.dev hostname. Pages association must precede DNS to avoid errors. No website changes are necessary. Bundle `src/worker.ts` to a Pages `_worker.js` in a new output directory and bind only its dedicated DB; see [advanced mode](https://developers.cloudflare.com/pages/functions/advanced-mode/). Do not publish the Workers dist directory blindly. Pages support for rate-limit bindings must be confirmed in the target environment; if unavailable, use the Pages Worker as a tiny gateway to the standalone API Worker and keep limits there. That gateway must forward Authorization and Origin, never account cookies or a browser-provided CF-Connecting-IP; prevent bypass of any gateway-specific trust. This extra gateway is optional, not shipped or required. Prefer workers.dev until the domain arrangement is approved.
 
+## Image storage rollout
+
+Bind the existing `space-storage` R2 bucket as `SPACE_STORAGE` (also declared in `wrangler.jsonc`; no storage credentials). With explicit approval, apply `migrations/0002_storage_images.sql` remotely before deploying the storage code. Confirm the account service issues tokens to `https://glowstudio.retrac.space`. See [storage.md](storage.md).
+
 ## Approval-dependent launch checklist
 
 1. Review and implement the separate account integration described in `accounts-integration.md`. Verify live revocation, deleted users, denied sibling origins and missing-session guest behavior there. Generate a dedicated bridge key through a secure secret-entry mechanism; never paste it into git or logs.
