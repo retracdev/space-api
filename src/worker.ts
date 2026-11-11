@@ -28,6 +28,16 @@ async function route(request: Request, env: Env): Promise<Response> {
     const user = await session(request, env, true);
     return ok({ authenticated: !!user, player: user });
   }
+  if (path.length === 4 && path[1] === 'players' && path[2] === 'id') {
+    if (method !== 'GET') fail(405, 'method_not_allowed');
+    let userId: string;
+    try { userId = decodeURIComponent(path[3]); }
+    catch { fail(400, 'invalid_user_id'); }
+    if (!userId || userId.length > 256) fail(400, 'invalid_user_id');
+    const user = (await directory(env, { ids: [userId] }))[0];
+    if (!user?.username) fail(404, 'player_not_found');
+    return ok({ username: user.username });
+  }
   if (path.length === 3 && path[1] === 'players' && method === 'GET') {
     if (path[2] !== 'me' && !/^[a-zA-Z0-9_]{3,20}$/.test(path[2])) fail(400, 'invalid_username');
     const user = path[2] === 'me' ? await session(request, env) :
