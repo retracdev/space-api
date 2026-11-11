@@ -14,7 +14,7 @@ No R2 API tokens, S3 credentials, access keys, public bucket domain or `r2.dev` 
 
 Apply migration `0002_storage_images.sql` before enabling storage. Locally: `npm run db:migrate`. Remotely, only with explicit approval: `npx wrangler d1 migrations apply space-api --remote`.
 
-Browser applications need their exact origin in `ALLOWED_ORIGINS` (this change adds `https://glow.retrac.space`), and the account service must issue access tokens to that origin.
+Browser applications need their exact origin in `ALLOWED_ORIGINS` (Glow is `https://glowstudio.retrac.space`), and the account service must issue access tokens to that origin.
 
 ## Endpoints
 

@@ -16,7 +16,7 @@ To obtain the intended `api.retrac.space` hostname while retaining Vercel DNS, a
 
 ## Image storage rollout
 
-Bind the existing `space-storage` R2 bucket as `SPACE_STORAGE` (also declared in `wrangler.jsonc`; no storage credentials). With explicit approval, apply `migrations/0002_storage_images.sql` remotely before deploying the storage code. Confirm the account service issues tokens to `https://glow.retrac.space`. See [storage.md](storage.md).
+Bind the existing `space-storage` R2 bucket as `SPACE_STORAGE` (also declared in `wrangler.jsonc`; no storage credentials). With explicit approval, apply `migrations/0002_storage_images.sql` remotely before deploying the storage code. Confirm the account service issues tokens to `https://glowstudio.retrac.space`. See [storage.md](storage.md).
 
 ## Approval-dependent launch checklist
 

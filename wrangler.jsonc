@@ -7,7 +7,7 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": {
-    "ALLOWED_ORIGINS": "https://chess.retrac.space,https://pong.retrac.space,https://2048.retrac.space,https://basketsmash.retrac.space,https://accounts.retrac.space,https://glow.retrac.space"
+    "ALLOWED_ORIGINS": "https://chess.retrac.space,https://pong.retrac.space,https://2048.retrac.space,https://basketsmash.retrac.space,https://accounts.retrac.space,https://soundboard.retrac.space,https://glowstudio.retrac.space"
   },
   "d1_databases": [{
     "binding": "DB", "database_name": "space-api",
