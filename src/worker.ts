@@ -3,12 +3,15 @@ import { drizzle } from 'drizzle-orm/d1';
 import { games, boards, saves, scores } from './schema';
 import { session, directory, type AccountEnv } from './accounts';
 import { ApiError, fail, ok, body, only, identifier, integer } from './http';
+import { storageRoute } from './storage';
 
 export interface Env extends AccountEnv {
   DB: D1Database;
   ALLOWED_ORIGINS: string;
   WRITE_LIMITER: RateLimit;
   REQUEST_LIMITER: RateLimit;
+  // R2 bucket `space-storage`, bound manually in Cloudflare. See docs/storage.md.
+  SPACE_STORAGE?: R2Bucket;
 }
 
 async function route(request: Request, env: Env): Promise<Response> {
@@ -35,6 +38,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     return ok(path[2] === 'me' ? { id: user.id, username: user.username, personalBests: bests } :
       { username: user.username, personalBests: bests });
   }
+  if (path[1] === 'storage') return storageRoute(request, env, path, url);
   if (path[1] !== 'games') fail(404, 'not_found');
   if (path.length === 2 && method === 'GET') return ok(await db.select().from(games));
   if (!path[2]) fail(404, 'not_found');
@@ -133,10 +137,11 @@ export default {
         response = new Response(null, { status: 204 });
       } else response = await route(request, env);
     } catch (error) {
-      response = Response.json({ error: { code: error instanceof ApiError ? error.code : 'service_unavailable' } },
+      response = Response.json({ error: error instanceof ApiError ? { ...error.details, code: error.code } : { code: 'service_unavailable' } },
         { status: error instanceof ApiError ? error.status : 503 });
     }
-    response.headers.set('Cache-Control', 'no-store');
+    // Only public storage files opt into caching; everything else stays no-store.
+    if (!response.headers.has('Cache-Control')) response.headers.set('Cache-Control', 'no-store');
     response.headers.set('X-Content-Type-Options', 'nosniff');
     response.headers.set('Vary', 'Origin');
     if (response.status === 429) response.headers.set('Retry-After', '60');
