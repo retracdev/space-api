@@ -1,8 +1,23 @@
 # v1 API contract
 
-Base URL: deployment-specific (intended `https://api.retrac.space`). HTTPS only in production. All responses are JSON except successful OPTIONS (204) and public storage files. Success is `{ "data": ... }`. Failure is `{ "error": { "code": "snake_case_code" } }`, optionally with structured fields beside `code` (e.g. `limit`, `used`). Errors never contain human-readable messages; applications own user-facing text. All responses are no-store except public storage files. Millisecond timestamps are Unix epoch numbers. No endpoint accepts an owner/player ID in a request body.
+Base URL: deployment-specific (intended `https://api.retrac.space`). HTTPS only in production. All responses are JSON except successful OPTIONS (204) and public storage files. Success is `{ "data": ... }`, except counters which return `{ "name": string, "count": number }` directly. Failure is `{ "error": { "code": "snake_case_code" } }`, optionally with structured fields beside `code` (e.g. `limit`, `used`). Errors never contain human-readable messages; applications own user-facing text. All responses are no-store except public storage files. Millisecond timestamps are Unix epoch numbers. No endpoint accepts an owner/player ID in a request body.
 
-Protected endpoints require `Authorization: Bearer <short-lived-account-token>`. See `accounts-integration.md`; cookies alone never authenticate this API. CORS permits only configured exact origins, methods GET/PUT/POST/DELETE/OPTIONS, and headers Authorization/Content-Type. Browser API requests use `credentials: omit`. Requests without Origin (server clients) still require the same bearer authorization on protected endpoints. CORS is not authentication.
+Protected endpoints require `Authorization: Bearer <short-lived-account-token>`. See `accounts-integration.md`; cookies alone never authenticate this API. CORS permits configured exact origins, methods GET/PUT/POST/DELETE/OPTIONS, and headers Authorization/Content-Type. Counter routes additionally permit HTTPS `retrac.space` and its subdomains (default port only); other routes retain the exact origin allowlist. Browser API requests use `credentials: omit`. Requests without Origin (server clients) still require the same bearer authorization on protected endpoints. CORS is not authentication.
+
+## Public counters
+
+| Method and path | Request | Response (no `data` wrapper) |
+| --- | --- | --- |
+| GET `/v1/counters/get/{name}` | none | `{ "name": "test", "count": 0 }`; creates a missing counter at 0 |
+| POST `/v1/counters/increment/{name}` | no body required | `{ "name": "test", "count": 1 }`; creates a missing counter at 0, then increments by 1 |
+
+Counter names are case-sensitive, nonempty strings of letters, digits, hyphens and underscores (`[a-zA-Z0-9_-]+`). URL-encoded names are decoded before validation. Invalid names return 400 `invalid_counter_name`, unsupported methods return 405 `method_not_allowed`, and unknown counter routes return 404 `not_found`. Errors use the standard error envelope above.
+
+Counters are public and shared globally by name, with no accounts, tokens, or application-level rate limiting. Anyone who can reach these endpoints can increment them. Cloudflare platform limits and protections still apply. Both operations use a single atomic SQL upsert with `RETURNING` in the existing D1 database, preventing lost increments or a separate read racing the response. GET preserves existing counts. Responses use the Worker's shared CORS, preflight, error and no-store handling.
+
+The additive migration is `migrations/0004_counters.sql`. It must be applied before deploying this feature; no remote migration or deployment is part of this implementation.
+
+## Other endpoints
 
 | Method and path | Authentication | Request | `data` response |
 | --- | --- | --- | --- |

@@ -5,6 +5,7 @@ import { session, directory, type AccountEnv } from './accounts';
 import { ApiError, fail, ok, body, only, identifier, integer } from './http';
 import { storageRoute } from './storage';
 import { soundboardRoute } from './soundboard';
+import { counterRoute } from './counters';
 
 export interface Env extends AccountEnv {
   DB: D1Database;
@@ -21,6 +22,8 @@ async function route(request: Request, env: Env): Promise<Response> {
   const method = request.method;
   if (path[0] !== 'v1') fail(404, 'not_found');
   if (!['GET', 'PUT', 'POST', 'DELETE'].includes(method)) fail(405, 'method_not_allowed');
+  // Public counters intentionally bypass both application rate-limit bindings.
+  if (path[1] === 'counters') return counterRoute(request, env, path);
   if (!(await env.REQUEST_LIMITER.limit({ key: request.headers.get('CF-Connecting-IP') ?? 'local' })).success)
     fail(429, 'rate_limited');
   const db = drizzle(env.DB);
@@ -137,7 +140,10 @@ async function writeLimit(env: Env, userId: string) {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const origin = request.headers.get('Origin');
-    const allowed = env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).includes(origin ?? '');
+    const path = new URL(request.url).pathname.split('/').filter(Boolean);
+    const publicCounterOrigin = path[0] === 'v1' && path[1] === 'counters' &&
+      /^https:\/\/(?:[a-z0-9-]+\.)*retrac\.space$/i.test(origin ?? '');
+    const allowed = publicCounterOrigin || env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).includes(origin ?? '');
     let response: Response;
     try {
       if (origin && !allowed) fail(403, 'origin_not_allowed');

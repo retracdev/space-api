@@ -1,6 +1,11 @@
 import { sql } from 'drizzle-orm';
 import { sqliteTable, text, integer, real, primaryKey, index, check, foreignKey } from 'drizzle-orm/sqlite-core';
 
+export const counters = sqliteTable('counters', {
+  name: text('name').primaryKey().notNull(),
+  count: integer('count').notNull().default(0),
+});
+
 export const soundboardNotifications = sqliteTable('soundboard_notifications', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   userId: text('user_id').notNull(),
