@@ -6,6 +6,7 @@ import { ApiError, fail, ok, body, only, identifier, integer } from './http';
 import { storageRoute } from './storage';
 import { soundboardRoute } from './soundboard';
 import { counterRoute } from './counters';
+import { presenceRoute, cleanupPresence } from './presence';
 
 export interface Env extends AccountEnv {
   DB: D1Database;
@@ -24,6 +25,8 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (!['GET', 'PUT', 'POST', 'DELETE'].includes(method)) fail(405, 'method_not_allowed');
   // Public counters intentionally bypass both application rate-limit bindings.
   if (path[1] === 'counters') return counterRoute(request, env, path);
+  // Public presence never uses account services, IP addresses, or rate-limit bindings.
+  if (path[1] === 'presence') return presenceRoute(request, env, path);
   if (!(await env.REQUEST_LIMITER.limit({ key: request.headers.get('CF-Connecting-IP') ?? 'local' })).success)
     fail(429, 'rate_limited');
   const db = drizzle(env.DB);
@@ -138,12 +141,15 @@ async function writeLimit(env: Env, userId: string) {
 }
 
 export default {
+  async scheduled(_event: ScheduledController, env: Env): Promise<void> {
+    await cleanupPresence(env.DB);
+  },
   async fetch(request: Request, env: Env): Promise<Response> {
     const origin = request.headers.get('Origin');
     const path = new URL(request.url).pathname.split('/').filter(Boolean);
-    const publicCounterOrigin = path[0] === 'v1' && path[1] === 'counters' &&
+    const publicSiteOrigin = path[0] === 'v1' && ['counters', 'presence'].includes(path[1]) &&
       /^https:\/\/(?:[a-z0-9-]+\.)*retrac\.space$/i.test(origin ?? '');
-    const allowed = publicCounterOrigin || env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).includes(origin ?? '');
+    const allowed = publicSiteOrigin || env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).includes(origin ?? '');
     let response: Response;
     try {
       if (origin && !allowed) fail(403, 'origin_not_allowed');
