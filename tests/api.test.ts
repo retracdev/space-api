@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { Miniflare } from 'miniflare';
 import { readFileSync, readdirSync } from 'node:fs';
 import worker, { type Env } from '../src/worker';
@@ -86,5 +86,106 @@ describe('essential v1 behavior with actual local D1', () => {
       method: 'DELETE', headers: { Authorization: 'Bearer alice' },
     }), { ...env, WRITE_LIMITER: { limit: async () => ({ success: false }) } });
     expect(response.status).toBe(429);
+  });
+});
+
+describe('soundboard notifications with actual local D1', () => {
+  beforeEach(async () => {
+    await env.DB.prepare('DELETE FROM soundboard_notifications').run();
+    accounts();
+  });
+  async function notification(userId: string, name: string, status = 'added', reason: string | null = null, createdAt = 1000) {
+    const result = await env.DB.prepare(`INSERT INTO soundboard_notifications
+      (user_id, sound_name, status, reason, created_at) VALUES (?, ?, ?, ?, ?)`)
+      .bind(userId, name, status, reason, createdAt).run();
+    return result.meta.last_row_id;
+  }
+  const path = 'soundboard/notifications';
+
+  it('requires verified sessions for reads and acknowledgments', async () => {
+    for (const [route, method, value] of [[path, 'GET', undefined], [path + '/ack', 'POST', { ids: [1] }]] as const) {
+      expect((await request(route, method, undefined, value)).status).toBe(401);
+      expect(await (await request(route, method, 'revoked', value)).json())
+        .toEqual({ error: { code: 'invalid_session' } });
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 503 })));
+    expect(await (await request(path, 'GET', 'alice')).json()).toEqual({ error: { code: 'accounts_unavailable' } });
+  });
+
+  it('returns only the caller\'s unread rows, in stable oldest-first order, without acknowledging', async () => {
+    const later = await notification('alice-id', 'Later', 'added', null, 2000);
+    const first = await notification('alice-id', 'Vine Boom');
+    const second = await notification('alice-id', 'Airhorn', 'denied', 'Already exists.');
+    await notification('bob-id', 'Private');
+    const read = await notification('alice-id', 'Previously read');
+    await env.DB.prepare('UPDATE soundboard_notifications SET read_at = 500 WHERE id = ?').bind(read).run();
+    const expected = { data: { notifications: [
+      { id: first, sound_name: 'Vine Boom', status: 'added', reason: null },
+      { id: second, sound_name: 'Airhorn', status: 'denied', reason: 'Already exists.' },
+      { id: later, sound_name: 'Later', status: 'added', reason: null },
+    ] } };
+    expect(await (await request(path, 'GET', 'alice')).json()).toEqual(expected);
+    expect(await (await request(path, 'GET', 'alice')).json()).toEqual(expected);
+    expect(await (await request(path, 'GET', 'bob')).json()).toMatchObject({ data: { notifications: [{ sound_name: 'Private' }] } });
+  });
+
+  it('acknowledges only owned rows, retains history, and preserves read timestamps on retries', async () => {
+    const alice = await notification('alice-id', 'Mine');
+    const pending = await notification('alice-id', 'Still unread');
+    const bob = await notification('bob-id', 'Other user');
+    expect(await (await request(path + '/ack', 'POST', 'alice', { ids: [alice, bob, alice, 999999] })).json())
+      .toEqual({ data: { success: true } });
+    const rows = await env.DB.prepare('SELECT id, read_at FROM soundboard_notifications ORDER BY id').all();
+    expect(rows.results).toEqual([
+      { id: alice, read_at: expect.any(Number) }, { id: pending, read_at: null }, { id: bob, read_at: null },
+    ]);
+    await request(path + '/ack', 'POST', 'alice', { ids: [alice] });
+    expect((await env.DB.prepare('SELECT id, read_at FROM soundboard_notifications ORDER BY id').all()).results)
+      .toEqual(rows.results);
+    expect(await (await request(path, 'GET', 'alice')).json())
+      .toEqual({ data: { notifications: [{ id: pending, sound_name: 'Still unread', status: 'added', reason: null }] } });
+    await request(path + '/ack', 'POST', 'alice', { ids: [pending] });
+    expect(await (await request(path, 'GET', 'alice')).json()).toEqual({ data: { notifications: [] } });
+    expect(await (await request(path + '/ack', 'POST', 'alice', { ids: [] })).json()).toEqual({ data: { success: true } });
+  });
+
+  it('rejects invalid bodies before acknowledging any rows', async () => {
+    const id = await notification('alice-id', 'Untouched');
+    for (const value of [null, [], {}, { ids: [id], user_id: 'bob-id' }, { ids: '1' },
+      { ids: [id, 0] }, { ids: [-1] }, { ids: [1.5] }, { ids: ['1'] }, { ids: [null] },
+      { ids: [Number.MAX_SAFE_INTEGER + 1] }, { ids: Array(51).fill(id) }]) {
+      expect((await request(path + '/ack', 'POST', 'alice', value)).status).toBe(400);
+    }
+    const raw = (text: string, contentType?: string) => worker.fetch(new Request('https://api.retrac.space/v1/' + path + '/ack', {
+      method: 'POST', headers: { Authorization: 'Bearer alice', ...(contentType ? { 'Content-Type': contentType } : {}) }, body: text,
+    }), env);
+    expect(await (await raw('{', 'application/json')).json()).toEqual({ error: { code: 'invalid_json' } });
+    expect((await raw('{"ids":[]}')).status).toBe(415);
+    expect((await raw(' '.repeat(66561), 'application/json')).status).toBe(413);
+    expect(await env.DB.prepare('SELECT read_at FROM soundboard_notifications WHERE id = ?').bind(id).first())
+      .toEqual({ read_at: null });
+  });
+
+  it('uses existing Soundboard CORS and write limits', async () => {
+    const soundboardOrigin = 'https://soundboard.retrac.space';
+    const soundboardEnv = { ...env, ALLOWED_ORIGINS: soundboardOrigin };
+    const response = await worker.fetch(new Request('https://api.retrac.space/v1/' + path, {
+      headers: { Origin: soundboardOrigin, Authorization: 'Bearer alice' },
+    }), soundboardEnv);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe(soundboardOrigin);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    const preflight = await worker.fetch(new Request('https://api.retrac.space/v1/' + path + '/ack', {
+      method: 'OPTIONS', headers: { Origin: soundboardOrigin, 'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'authorization,content-type' },
+    }), soundboardEnv);
+    expect(preflight.status).toBe(204);
+    const limited = await worker.fetch(new Request('https://api.retrac.space/v1/' + path + '/ack', {
+      method: 'POST', headers: { Authorization: 'Bearer alice', 'Content-Type': 'application/json' }, body: '{"ids":[]}',
+    }), { ...env, WRITE_LIMITER: { limit: async () => ({ success: false }) } });
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get('Retry-After')).toBe('60');
+    expect((await request(path, 'POST', 'alice')).status).toBe(405);
+    expect((await request(path + '/ack', 'GET', 'alice')).status).toBe(405);
+    expect((await request(path + '/create', 'POST', 'alice')).status).toBe(404);
   });
 });
