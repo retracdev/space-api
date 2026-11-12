@@ -5,6 +5,7 @@ export const presence = sqliteTable('presence', {
   site: text('site').notNull(),
   visitorId: text('visitor_id').notNull(),
   displayName: text('display_name').notNull(),
+  isAnonymous: integer('is_anonymous', { mode: 'boolean' }).notNull().default(false),
   lastSeen: integer('last_seen').notNull(),
 }, t => [primaryKey({ columns: [t.site, t.visitorId] }),
   index('presence_site_last_seen').on(t.site, t.lastSeen),

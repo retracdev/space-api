@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { Miniflare } from 'miniflare';
 import { readFileSync } from 'node:fs';
 import worker, { type Env } from '../src/worker';
-import { cleanupPresence } from '../src/presence';
+import { ANONYMOUS_ANIMALS, cleanupPresence } from '../src/presence';
 
 let mf: Miniflare;
 let env: Env;
@@ -14,8 +14,10 @@ beforeAll(async () => {
   mf = new Miniflare({ modules: true, script: 'export default {fetch(){return new Response("test")}}',
     compatibilityDate: '2026-07-30', d1Databases: { DB: 'test-presence' } });
   const db = await mf.getD1Database('DB');
-  for (const statement of readFileSync('migrations/0005_presence.sql', 'utf8').split(';').filter(s => s.trim()))
-    await db.prepare(statement).run();
+  for (const migration of ['0005_presence.sql', '0006_presence_anonymous.sql']) {
+    for (const statement of readFileSync(`migrations/${migration}`, 'utf8').split(';').filter(s => s.trim()))
+      await db.prepare(statement).run();
+  }
   // Any access to account services or either limiter must fail these public requests.
   const limiter = { limit: vi.fn(async () => { throw new Error('unexpected limiter'); }) };
   env = { DB: db as unknown as D1Database, ALLOWED_ORIGINS: '', ACCOUNTS_API_KEY: '',
@@ -42,11 +44,53 @@ async function heartbeat(site = 'soundboard', username?: string, id = visitorId)
 }
 
 describe('public presence with actual local D1', () => {
+  const sessionId = (n: number) => `550e8400-e29b-41d4-a716-${String(n).padStart(12, '0')}`;
+
+  it('assigns distinct animals to concurrent visitors until the entire pool is occupied', async () => {
+    expect(ANONYMOUS_ANIMALS.length).toBe(64);
+    expect(new Set(ANONYMOUS_ANIMALS).size).toBe(64);
+    const visitors = await Promise.all(ANONYMOUS_ANIMALS.map((_, i) => heartbeat('soundboard', undefined, sessionId(i))));
+    expect(new Set(visitors.map(row => row.displayName)).size).toBe(64);
+    const overflow = await heartbeat('soundboard', undefined, sessionId(64));
+    expect(visitors.map(row => row.displayName)).toContain(overflow.displayName);
+    expect(await heartbeat('soundboard', undefined, sessionId(64))).toEqual(overflow);
+    // The pool is independent for every site.
+    const separate = await heartbeat('glowstudio');
+    expect(visitors.map(row => row.displayName)).toContain(separate.displayName);
+  });
+
+  it('reuses freed animals instead of duplicating names after leave or expiry', async () => {
+    const visitors = await Promise.all(ANONYMOUS_ANIMALS.map((_, i) => heartbeat('soundboard', undefined, sessionId(i))));
+    await request('leave/soundboard', 'POST', { visitorId: sessionId(0) });
+    expect((await heartbeat('soundboard', undefined, sessionId(64))).displayName).toBe(visitors[0].displayName);
+    await env.DB.prepare('UPDATE presence SET last_seen = ? WHERE visitor_id = ?')
+      .bind(now - 90_000, sessionId(1)).run();
+    expect((await heartbeat('soundboard', undefined, sessionId(65))).displayName).toBe(visitors[1].displayName);
+    // A returning expired visitor must not reclaim an animal that has been reused.
+    await request('leave/soundboard', 'POST', { visitorId: sessionId(2) });
+    expect((await heartbeat('soundboard', undefined, sessionId(1))).displayName).toBe(visitors[2].displayName);
+  });
+
+  it('repairs legacy anonymous collisions while preserving supplied usernames', async () => {
+    await env.DB.prepare(`INSERT INTO presence (site, visitor_id, display_name, last_seen, is_anonymous)
+      VALUES ('soundboard', ?, 'Anonymous Koala', ?, 1), ('soundboard', ?, 'Anonymous Koala', ?, 1)`)
+      .bind(visitorId, now, otherId, now).run();
+    const fixed = await heartbeat();
+    expect(fixed.displayName).not.toBe('Anonymous Koala');
+    expect((await heartbeat('soundboard', undefined, otherId)).displayName).toBe('Anonymous Koala');
+    expect(await heartbeat()).toEqual(fixed);
+    await heartbeat('soundboard', 'Anonymous Koala');
+    expect((await heartbeat()).displayName).toBe('Anonymous Koala');
+    // The auto-assigned visitor moves aside for an explicitly supplied label.
+    expect((await heartbeat('soundboard', undefined, otherId)).displayName).not.toBe('Anonymous Koala');
+  });
+
   it('creates rooms on first use and persists server-generated anonymous names', async () => {
     expect(await (await request('online/brand-new')).json()).toEqual({ site: 'brand-new', count: 0, users: [] });
     const first = await heartbeat('brand-new');
     expect(first).toEqual({ site: 'brand-new', visitorId, online: true,
-      displayName: expect.stringMatching(/^Anonymous (Fox|Panda|Otter|Penguin|Koala|Dolphin|Owl|Bear)$/) });
+      displayName: expect.any(String) });
+    expect(ANONYMOUS_ANIMALS.map(animal => `Anonymous ${animal}`)).toContain(first.displayName);
     expect(await heartbeat('brand-new')).toEqual(first);
     expect(await (await request('online/brand-new')).json()).toEqual({ site: 'brand-new', count: 1,
       users: [{ displayName: first.displayName }] });

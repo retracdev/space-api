@@ -34,11 +34,19 @@ bits); casing is normalized. Generate UUID v4 with `crypto.randomUUID()`.
 points after trimming, without control characters. Empty strings and null are
 rejected. Unknown fields are rejected, including client timestamps.
 
-If omitted on first insertion, the server assigns Anonymous Fox, Panda, Otter,
-Penguin, Koala, Dolphin, Owl or Bear. Subsequent heartbeats preserve the stored
-name unless a username is supplied. Concurrent heartbeats cannot create duplicate
-rows or replace an existing name with a newly generated anonymous name.
-Anonymous names are friendly labels and can repeat across visitors.
+If omitted on first insertion, the server assigns a name from a pool of 64
+animals, such as Anonymous Fox, Capybara, Axolotl or Puffin. It chooses an animal
+not used by another active visitor in the same site. Selection and assignment
+happen in one atomic D1 upsert, including concurrent arrivals. Expired sessions
+do not reserve names. Other sites have independent pools.
+
+Only when all 64 animals are occupied does the server reuse a name, choosing
+among the least-used animals. Subsequent heartbeats keep an anonymous name
+unless it collides with another active visitor and a free animal is available.
+This also repairs existing anonymous duplicates and handles returning sessions
+whose animal was reused after expiry. Supplied usernames are preserved when
+omitted on later heartbeats; users can deliberately submit duplicate names.
+An internal `is_anonymous` flag distinguishes generated names from supplied ones.
 
 ## Online visitors
 
@@ -68,9 +76,9 @@ never write to D1. Render names with `textContent`, never `innerHTML`.
 ```
 
 Deletes only this site's session. Repeated leave calls succeed. A later heartbeat
-recreates the record. Names persist while the row exists; after explicit leave
-or periodic cleanup an anonymous session may receive a new name. Accurate
-expiration never depends on a leave request reaching the server.
+recreates the record. Anonymous names can change to resolve collisions, or after
+explicit leave or periodic cleanup. Accurate expiration never depends on a
+leave request reaching the server.
 
 ## Global summary
 
@@ -177,13 +185,21 @@ An hourly Worker cron (`0 * * * *`) deletes expired records using the global
 last-seen index. Inactive rows can remain until that sweep but are immediately
 excluded from reads. Scheduled errors propagate for platform reporting.
 
+Migration `0006_presence_anonymous.sql` adds the internal `is_anonymous` flag.
+It classifies the original eight Anonymous animal labels as generated names,
+since the old schema did not record their source. A legacy user who explicitly
+chose one of those exact labels can resend their username to mark it as supplied.
+New explicitly supplied labels are never renamed automatically.
+
 Follow the existing migration workflow: `npm run db:migrate` applies migrations
 locally. After explicit production approval, apply migrations with
 `npx wrangler d1 migrations apply space-api --remote` **before** deploying the
-Worker using `npx wrangler deploy`. Deployment installs the hourly cron trigger.
+Worker using `npx wrangler deploy`. Both migrations 0005 and 0006 must be applied
+before deploying the current code. Deployment installs the hourly cron trigger.
 No production migration or deployment was performed for this change.
 
 Tests are in `tests/presence.test.ts` using Vitest and actual local D1 through
 Miniflare. They cover rooms, names, refresh, expiry, leave, isolation, summaries,
-concurrency, cleanup, CORS, privacy shapes and invalid inputs. Per the request,
+concurrency, pool exhaustion, name reuse, collision repair, cleanup, CORS, privacy
+shapes and invalid inputs. Per the request,
 tests were added but not run.
