@@ -8,6 +8,8 @@ Protected endpoints require `Authorization: Bearer <short-lived-account-token>`.
 | --- | --- | --- | --- |
 | GET `/v1/health` | public | none | `{status:"ok"}` (process liveness, not dependency readiness) |
 | GET `/v1/session` | optional | none | `{authenticated:boolean,player:null\|{id,username}}` |
+| GET `/v1/soundboard/notifications` | required | none | `{notifications:[{id,sound_name,status,reason}]}`; unread, caller only, oldest first |
+| POST `/v1/soundboard/notifications/ack` | required | exactly `{ids:number[]}` JSON, at most 50 IDs | `{success:true}`; acknowledges caller's matching unread rows |
 | GET `/v1/players/me` | required | none | `{id,username,personalBests:[{gameId,leaderboardId,score}]}` |
 | GET `/v1/players/id/{userId}` | public | URL-encoded retrac.space user ID, 1–256 characters after decoding | `{username}` (current account username) |
 | GET `/v1/players/{username}` | public | normalized username, 3–20 letters/digits/underscores | `{username,personalBests:[{gameId,leaderboardId,score}]}` |
@@ -57,5 +59,7 @@ Content-Type: application/json
 ```
 
 Image storage endpoints, categories, quotas and their error codes are documented in [storage.md](storage.md).
+
+Soundboard integration, error codes and manual D1 administration SQL are documented in [soundboard-notifications.md](soundboard-notifications.md).
 
 Status codes: 200 for successful operations (including first save/score); 201 image upload; 204 OPTIONS; 304 public file revalidation; 400 malformed JSON/body, invalid score/identifier/slot/pagination; 401 missing, invalid or expired session; 403 denied origin/preflight or incomplete username onboarding; 404 unknown route/game/board/player/save/image; 405 unsupported method; 409 storage quota reached; 413 oversized request/save/image; 415 missing/wrong JSON Content-Type or unsupported image type; 429 rate limit (Retry-After: 60); 503 unavailable accounts/database/configuration or unexpected internal error. No errors redirect or expose upstream diagnostics. Missing auth only becomes a normal guest result on `/v1/session`; public endpoints do not need tokens. Unknown usernames/deleted accounts return 404; upstream outages return 503. Public profiles never expose the stable ID or private account data; `/me` and `/session` expose only the caller's ID.

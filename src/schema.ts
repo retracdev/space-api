@@ -1,6 +1,17 @@
 import { sql } from 'drizzle-orm';
 import { sqliteTable, text, integer, real, primaryKey, index, check, foreignKey } from 'drizzle-orm/sqlite-core';
 
+export const soundboardNotifications = sqliteTable('soundboard_notifications', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  userId: text('user_id').notNull(),
+  soundName: text('sound_name').notNull(),
+  status: text('status', { enum: ['added', 'denied'] }).notNull(),
+  reason: text('reason'),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch() * 1000)`),
+  readAt: integer('read_at'),
+}, t => [index('soundboard_notifications_user').on(t.userId, t.readAt, t.createdAt, t.id),
+  check('soundboard_notification_status_valid', sql`${t.status} IN ('added','denied')`)]);
+
 export const games = sqliteTable('games', {
   id: text('id').primaryKey(), name: text('name').notNull(),
   saveSlots: integer('save_slots').notNull().default(5),

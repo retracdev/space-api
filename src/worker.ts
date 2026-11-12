@@ -4,6 +4,7 @@ import { games, boards, saves, scores } from './schema';
 import { session, directory, type AccountEnv } from './accounts';
 import { ApiError, fail, ok, body, only, identifier, integer } from './http';
 import { storageRoute } from './storage';
+import { soundboardRoute } from './soundboard';
 
 export interface Env extends AccountEnv {
   DB: D1Database;
@@ -49,6 +50,7 @@ async function route(request: Request, env: Env): Promise<Response> {
       { username: user.username, personalBests: bests });
   }
   if (path[1] === 'storage') return storageRoute(request, env, path, url);
+  if (path[1] === 'soundboard') return soundboardRoute(request, env, path);
   if (path[1] !== 'games') fail(404, 'not_found');
   if (path.length === 2 && method === 'GET') return ok(await db.select().from(games));
   if (!path[2]) fail(404, 'not_found');
