@@ -2,7 +2,16 @@ import { fail, readBytes } from './http';
 import type { Env } from './worker';
 
 export const PRESENCE_TTL_MS = 90_000;
-const animals = ['Fox', 'Panda', 'Otter', 'Penguin', 'Koala', 'Dolphin', 'Owl', 'Bear'];
+export const ANONYMOUS_ANIMALS = [
+  'Fox', 'Panda', 'Otter', 'Penguin', 'Koala', 'Dolphin', 'Owl', 'Bear',
+  'Tiger', 'Lion', 'Wolf', 'Rabbit', 'Deer', 'Raccoon', 'Hedgehog', 'Squirrel',
+  'Badger', 'Beaver', 'Moose', 'Elk', 'Bison', 'Yak', 'Alpaca', 'Llama',
+  'Camel', 'Giraffe', 'Zebra', 'Elephant', 'Rhino', 'Hippo', 'Gorilla', 'Lemur',
+  'Sloth', 'Armadillo', 'Anteater', 'Capybara', 'Wombat', 'Quokka', 'Kangaroo', 'Platypus',
+  'Seal', 'Walrus', 'Whale', 'Orca', 'Narwhal', 'Manatee', 'Shark', 'Stingray',
+  'Octopus', 'Squid', 'Seahorse', 'Turtle', 'Tortoise', 'Gecko', 'Iguana', 'Chameleon',
+  'Frog', 'Axolotl', 'Flamingo', 'Pelican', 'Puffin', 'Toucan', 'Parrot', 'Swan',
+];
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 async function payload(request: Request, heartbeat: boolean) {
@@ -55,15 +64,30 @@ export async function presenceRoute(request: Request, env: Env, path: string[]):
     await env.DB.prepare('DELETE FROM presence WHERE site = ? AND visitor_id = ?').bind(site, visitorId).run();
     return Response.json({ success: true });
   }
-  const anonymous = `Anonymous ${animals[crypto.getRandomValues(new Uint32Array(1))[0] % animals.length]}`;
-  // One atomic statement preserves the winning anonymous name under concurrent inserts.
-  // Omitted usernames preserve existing names, including previously supplied usernames.
-  const row = await env.DB.prepare(`INSERT INTO presence (site, visitor_id, display_name, last_seen)
-    VALUES (?, ?, ?, ?) ON CONFLICT (site, visitor_id) DO UPDATE SET
-    display_name = COALESCE(?, presence.display_name),
+  const now = Date.now();
+  // Choose and claim in one atomic write, so concurrent visitors cannot claim
+  // the same unused animal. Ignore expired sessions and this visitor's own row.
+  // A zero-use name always wins; once exhausted, reuse the least occupied names.
+  const row = await env.DB.prepare(`WITH occupied AS MATERIALIZED (
+      SELECT display_name, COUNT(*) AS uses FROM presence
+      WHERE site = ? AND visitor_id != ? AND last_seen > ? GROUP BY display_name
+    ), candidate AS MATERIALIZED (
+      SELECT pool.value AS name, COALESCE(occupied.uses, 0) AS uses FROM json_each(?) AS pool
+      LEFT JOIN occupied ON occupied.display_name = pool.value
+      ORDER BY COALESCE(occupied.uses, 0), random() LIMIT 1
+    )
+    INSERT INTO presence (site, visitor_id, display_name, last_seen, is_anonymous)
+    VALUES (?, ?, COALESCE(?, (SELECT name FROM candidate)), ?, ?)
+    ON CONFLICT (site, visitor_id) DO UPDATE SET
+    display_name = CASE WHEN ? IS NOT NULL OR (presence.is_anonymous = 1 AND (SELECT uses FROM candidate) = 0 AND
+      EXISTS (SELECT 1 FROM occupied WHERE occupied.display_name = presence.display_name))
+      THEN excluded.display_name ELSE presence.display_name END,
+    is_anonymous = CASE WHEN ? IS NOT NULL THEN 0 ELSE presence.is_anonymous END,
     last_seen = MAX(presence.last_seen, excluded.last_seen)
     RETURNING display_name AS displayName`)
-    .bind(site, visitorId, username ?? anonymous, Date.now(), username).first<{ displayName: string }>();
+    .bind(site, visitorId, now - PRESENCE_TTL_MS, JSON.stringify(ANONYMOUS_ANIMALS.map(animal => `Anonymous ${animal}`)),
+      site, visitorId, username, now, username === null ? 1 : 0, username, username)
+    .first<{ displayName: string }>();
   if (!row) fail(503, 'service_unavailable');
   return Response.json({ site, visitorId, displayName: row.displayName, online: true });
 }
