@@ -6,6 +6,7 @@
   "compatibility_flags": ["global_fetch_strictly_public"],
   "workers_dev": true,
   "preview_urls": false,
+  "triggers": { "crons": ["0 * * * *"] },
   "vars": {
     "ALLOWED_ORIGINS": "https://chess.retrac.space,https://pong.retrac.space,https://2048.retrac.space,https://basketsmash.retrac.space,https://accounts.retrac.space,https://soundboard.retrac.space,https://glowstudio.retrac.space"
   },

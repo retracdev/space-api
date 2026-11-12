@@ -1,6 +1,15 @@
 import { sql } from 'drizzle-orm';
 import { sqliteTable, text, integer, real, primaryKey, index, check, foreignKey } from 'drizzle-orm/sqlite-core';
 
+export const presence = sqliteTable('presence', {
+  site: text('site').notNull(),
+  visitorId: text('visitor_id').notNull(),
+  displayName: text('display_name').notNull(),
+  lastSeen: integer('last_seen').notNull(),
+}, t => [primaryKey({ columns: [t.site, t.visitorId] }),
+  index('presence_site_last_seen').on(t.site, t.lastSeen),
+  index('presence_last_seen').on(t.lastSeen)]);
+
 export const counters = sqliteTable('counters', {
   name: text('name').primaryKey().notNull(),
   count: integer('count').notNull().default(0),
