@@ -14,7 +14,7 @@ beforeAll(async () => {
   mf = new Miniflare({ modules: true, script: 'export default {fetch(){return new Response("test")}}',
     compatibilityDate: '2026-07-30', d1Databases: { DB: 'test-presence' } });
   const db = await mf.getD1Database('DB');
-  for (const migration of ['0005_presence.sql', '0006_presence_anonymous.sql']) {
+  for (const migration of ['0005_presence.sql', '0006_presence_anonymous.sql', '0007_presence_status.sql']) {
     for (const statement of readFileSync(`migrations/${migration}`, 'utf8').split(';').filter(s => s.trim()))
       await db.prepare(statement).run();
   }
@@ -40,7 +40,7 @@ function request(path: string, method = 'GET', value?: unknown, from: string | n
 async function heartbeat(site = 'soundboard', username?: string, id = visitorId) {
   const response = await request('heartbeat/' + site, 'POST', { visitorId: id, ...(username === undefined ? {} : { username }) });
   expect(response.status).toBe(200);
-  return response.json() as Promise<{ site: string; visitorId: string; displayName: string; online: boolean }>;
+  return response.json() as Promise<{ site: string; visitorId: string; displayName: string; online: boolean; status: 'online' | 'idle' }>;
 }
 
 describe('public presence with actual local D1', () => {
@@ -88,12 +88,12 @@ describe('public presence with actual local D1', () => {
   it('creates rooms on first use and persists server-generated anonymous names', async () => {
     expect(await (await request('online/brand-new')).json()).toEqual({ site: 'brand-new', count: 0, users: [] });
     const first = await heartbeat('brand-new');
-    expect(first).toEqual({ site: 'brand-new', visitorId, online: true,
+    expect(first).toEqual({ site: 'brand-new', visitorId, online: true, status: 'online',
       displayName: expect.any(String) });
     expect(ANONYMOUS_ANIMALS.map(animal => `Anonymous ${animal}`)).toContain(first.displayName);
     expect(await heartbeat('brand-new')).toEqual(first);
     expect(await (await request('online/brand-new')).json()).toEqual({ site: 'brand-new', count: 1,
-      users: [{ displayName: first.displayName }] });
+      users: [{ displayName: first.displayName, status: 'online' }] });
   });
 
   it('updates usernames and preserves them when omitted, treating names as text', async () => {
@@ -102,7 +102,39 @@ describe('public presence with actual local D1', () => {
     expect((await heartbeat()).displayName).toBe('retrac');
     const name = "<b>guest</b> '; DROP TABLE presence; --";
     expect((await heartbeat('soundboard', name)).displayName).toBe(name);
-    expect(await (await request('online/soundboard')).json()).toEqual({ site: 'soundboard', count: 1, users: [{ displayName: name }] });
+    expect(await (await request('online/soundboard')).json()).toEqual({ site: 'soundboard', count: 1, users: [{ displayName: name, status: 'online' }] });
+  });
+
+  it('supports idle creation, refresh and return to online with site isolation and expiry', async () => {
+    const send = () => request('heartbeat/soundboard', 'POST', { visitorId, status: 'idle' });
+    const first = await (await send()).json() as { displayName: string };
+    expect(first).toMatchObject({ online: true, status: 'idle' });
+    await heartbeat('glowstudio');
+    expect(await (await request('online/glowstudio')).json()).toMatchObject({ users: [{ status: 'online' }] });
+    vi.mocked(Date.now).mockReturnValue(now + 80_000);
+    expect(await (await send()).json()).toEqual(first);
+    vi.mocked(Date.now).mockReturnValue(now + 90_000);
+    expect(await (await request('online/soundboard')).json()).toEqual({ site: 'soundboard', count: 1,
+      users: [{ displayName: first.displayName, status: 'idle' }] });
+    expect(await (await request('summary')).json()).toEqual({ totalOnline: 1, sites: { soundboard: 1 } });
+    expect(await heartbeat()).toMatchObject({ displayName: first.displayName, status: 'online' });
+    expect(await (await send()).json()).toMatchObject({ status: 'idle' });
+    const active = await request('heartbeat/soundboard', 'POST', { visitorId, status: 'online' });
+    expect(await active.json()).toMatchObject({ displayName: first.displayName, status: 'online' });
+    await send();
+    vi.mocked(Date.now).mockReturnValue(now + 180_000);
+    expect(await (await request('online/soundboard')).json()).toMatchObject({ count: 0, users: [] });
+    expect(await (await request('summary')).json()).toEqual({ totalOnline: 0, sites: {} });
+  });
+
+  it('rejects invalid status values and status on leave without writing', async () => {
+    for (const status of ['Idle', 'offline', '', null, true, 1, {}]) {
+      const response = await request('heartbeat/site', 'POST', { visitorId, status });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: { code: 'invalid_status' } });
+    }
+    expect((await request('leave/site', 'POST', { visitorId, status: 'idle' })).status).toBe(400);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM presence').first('n')).toBe(0);
   });
 
   it('refreshes heartbeats and expires exactly at 90 seconds without read-side writes', async () => {
@@ -123,7 +155,7 @@ describe('public presence with actual local D1', () => {
     expect(await (await request('leave/soundboard', 'POST', { visitorId })).json()).toEqual({ success: true });
     expect(await (await request('leave/soundboard', 'POST', { visitorId })).json()).toEqual({ success: true });
     expect(await (await request('online/soundboard')).json()).toMatchObject({ count: 0 });
-    expect(await (await request('online/glowstudio')).json()).toEqual({ site: 'glowstudio', count: 1, users: [{ displayName: 'Glow' }] });
+    expect(await (await request('online/glowstudio')).json()).toEqual({ site: 'glowstudio', count: 1, users: [{ displayName: 'Glow', status: 'online' }] });
   });
 
   it('summarizes active site sessions, including one visitor on multiple sites', async () => {
@@ -139,7 +171,7 @@ describe('public presence with actual local D1', () => {
     const updated = await Promise.all(Array.from({ length: 12 }, () => heartbeat('soundboard', 'retrac')));
     expect(updated.every(row => row.displayName === 'retrac')).toBe(true);
     expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM presence').first('n')).toBe(1);
-    expect(await (await request('online/soundboard')).json()).toEqual({ site: 'soundboard', count: 1, users: [{ displayName: 'retrac' }] });
+    expect(await (await request('online/soundboard')).json()).toEqual({ site: 'soundboard', count: 1, users: [{ displayName: 'retrac', status: 'online' }] });
   });
 
   it('normalizes UUID casing and never moves last_seen backwards', async () => {
