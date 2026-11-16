@@ -25,7 +25,7 @@ Every presence response, including errors, has `Cache-Control: no-store`.
 ```
 
 ```json
-{"site":"soundboard","visitorId":"550e8400-e29b-41d4-a716-446655440000","displayName":"retrac","online":true}
+{"site":"soundboard","visitorId":"550e8400-e29b-41d4-a716-446655440000","displayName":"retrac","online":true,"status":"online"}
 ```
 
 `visitorId` must be a standard hyphenated UUID (versions 1–8 with RFC variant
@@ -33,6 +33,15 @@ bits); casing is normalized. Generate UUID v4 with `crypto.randomUUID()`.
 `username` is optional. When present it must be a string with 1–40 Unicode code
 points after trimming, without control characters. Empty strings and null are
 rejected. Unknown fields are rejected, including client timestamps.
+
+`status` is optional and accepts exactly `"online"` or `"idle"` (lowercase).
+For example, send `{"visitorId":"550e8400-e29b-41d4-a716-446655440000","status":"idle"}`
+when the user becomes idle. Each heartbeat without `status` defaults to `"online"`,
+including when returning from idle. Clients own idle detection and should keep
+sending heartbeats while idle. Both statuses expire after 90 seconds without a
+heartbeat. Idle visitors remain connected: `online: true`, site counts and global
+summary counts include them. Heartbeat responses include the stored `status`.
+Status is independent for each site, including anonymous visitors.
 
 If omitted on first insertion, the server assigns a name from a pool of 64
 animals, such as Anonymous Fox, Capybara, Axolotl or Puffin. It chooses an animal
@@ -53,13 +62,13 @@ An internal `is_anonymous` flag distinguishes generated names from supplied ones
 `GET /v1/presence/online/soundboard`:
 
 ```json
-{"site":"soundboard","count":3,"users":[{"displayName":"retrac"},{"displayName":"Anonymous Fox"},{"displayName":"Anonymous Panda"}]}
+{"site":"soundboard","count":3,"users":[{"displayName":"retrac","status":"online"},{"displayName":"Anonymous Fox","status":"idle"},{"displayName":"Anonymous Panda","status":"online"}]}
 ```
 
 Only heartbeats newer than 90 seconds are included. At exactly 90 seconds the
 session is offline. A missing or inactive room returns `count: 0, users: []`.
 Each row represents one site session; duplicate names are not deduplicated.
-The list exposes only display names, ordered by most recent heartbeat first.
+The list exposes display names and status, ordered by most recent heartbeat first.
 No visitor IDs, IPs, timestamps, accounts, or fingerprints are exposed. Reads
 never write to D1. Render names with `textContent`, never `innerHTML`.
 
@@ -104,7 +113,7 @@ public counters convention. Errors use the shared API format:
 
 | Status | Codes |
 | --- | --- |
-| 400 | `invalid_site`, `invalid_visitor_id`, `invalid_username`, `invalid_body`, `invalid_json` |
+| 400 | `invalid_site`, `invalid_visitor_id`, `invalid_username`, `invalid_status`, `invalid_body`, `invalid_json` |
 | 403 | `origin_not_allowed`, `preflight_denied` |
 | 404 | `not_found` |
 | 405 | `method_not_allowed` |
@@ -114,7 +123,7 @@ public counters convention. Errors use the shared API format:
 
 POST bodies have a hard 1,024-byte cap, enforced while streaming even without
 Content-Length. All SQL values are bound parameters. The API stores only site,
-random visitor ID, display name and a server timestamp in milliseconds.
+random visitor ID, display name, anonymous-name flag, status and a server timestamp in milliseconds.
 
 ## Minimal JavaScript integration
 
@@ -164,7 +173,7 @@ async function online() {
     credentials: 'omit', cache: 'no-store',
   });
   if (!response.ok) throw new Error(`Presence: ${response.status}`);
-  return response.json(); // { site, count, users: [{ displayName }] }
+  return response.json(); // { site, count, users: [{ displayName, status }] }
 }
 ```
 
@@ -191,15 +200,18 @@ since the old schema did not record their source. A legacy user who explicitly
 chose one of those exact labels can resend their username to mark it as supplied.
 New explicitly supplied labels are never renamed automatically.
 
+Migration `0007_presence_status.sql` adds a validated `status` column defaulting
+to `online`, including for existing sessions. Apply it before deploying the
+Worker with idle support.
+
 Follow the existing migration workflow: `npm run db:migrate` applies migrations
 locally. After explicit production approval, apply migrations with
 `npx wrangler d1 migrations apply space-api --remote` **before** deploying the
-Worker using `npx wrangler deploy`. Both migrations 0005 and 0006 must be applied
+Worker using `npx wrangler deploy`. Migrations 0005, 0006 and 0007 must be applied
 before deploying the current code. Deployment installs the hourly cron trigger.
 No production migration or deployment was performed for this change.
 
 Tests are in `tests/presence.test.ts` using Vitest and actual local D1 through
 Miniflare. They cover rooms, names, refresh, expiry, leave, isolation, summaries,
 concurrency, pool exhaustion, name reuse, collision repair, cleanup, CORS, privacy
-shapes and invalid inputs. Per the request,
-tests were added but not run.
+shapes, idle transitions and invalid inputs.

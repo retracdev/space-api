@@ -6,10 +6,12 @@ export const presence = sqliteTable('presence', {
   visitorId: text('visitor_id').notNull(),
   displayName: text('display_name').notNull(),
   isAnonymous: integer('is_anonymous', { mode: 'boolean' }).notNull().default(false),
+  status: text('status', { enum: ['online', 'idle'] }).notNull().default('online'),
   lastSeen: integer('last_seen').notNull(),
 }, t => [primaryKey({ columns: [t.site, t.visitorId] }),
   index('presence_site_last_seen').on(t.site, t.lastSeen),
-  index('presence_last_seen').on(t.lastSeen)]);
+  index('presence_last_seen').on(t.lastSeen),
+  check('presence_status_valid', sql`${t.status} IN ('online','idle')`)]);
 
 export const counters = sqliteTable('counters', {
   name: text('name').primaryKey().notNull(),
